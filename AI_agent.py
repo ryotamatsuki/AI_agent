@@ -3,12 +3,12 @@ import requests
 import re
 
 # Gemini API のエンドポイントと API キー（Google Cloud コンソールから発行したキー）
-API_KEY = "AIzaSyBTNVkzjKD3sUNVUMlp_tcXWQMO-FpfrSo"
+API_KEY = "YOUR_GEMINI_API_KEY"
 
 def analyze_question(question):
     """
-    質問内容を解析し、感情やキーワードに応じたスコアを返す関数
-    例として、キーワード '困った' や '悩み' が含まれていればスコアを高めにする
+    質問内容を解析し、感情やキーワードに応じたスコアを返す関数。
+    キーワード '困った' や '悩み' などが含まれていればスコアを高めにする。
     """
     score = 0
     keywords_emotional = ["困った", "悩み", "苦しい", "辛い"]
@@ -24,32 +24,29 @@ def analyze_question(question):
 
 def adjust_parameters(question):
     """
-    質問の内容に応じてペルソナごとのパラメーター（プロンプト内に埋め込むスタイル・詳細文）を自動調整する関数
+    質問の内容に応じて、各ペルソナのプロンプトに埋め込むスタイル・詳細文を自動調整する関数。
     """
     score = analyze_question(question)
-    
     persona_params = {}
-
     if score > 0:
-        # 感情寄りの回答を重視する設定（パラメーターはプロンプト内に記載）
+        # 感情寄りの回答を重視
         persona_params["ペルソナ1"] = {"style": "情熱的", "detail": "感情に寄り添う回答"}
         persona_params["ペルソナ2"] = {"style": "共感的", "detail": "心情を重視した解説"}
         persona_params["ペルソナ3"] = {"style": "柔軟", "detail": "状況に合わせた多面的な視点"}
     else:
-        # 論理寄りの回答を重視する設定
+        # 論理寄りの回答を重視
         persona_params["ペルソナ1"] = {"style": "論理的", "detail": "具体的な解説を重視"}
         persona_params["ペルソナ2"] = {"style": "分析的", "detail": "データや事実を踏まえた説明"}
         persona_params["ペルソナ3"] = {"style": "客観的", "detail": "中立的な視点からの考察"}
-    
     return persona_params
 
 def call_gemini_api(prompt):
     """
     Google Generative Language API の Gemini モデルを呼び出し、
-    指定のプロンプトに基づいた回答を取得する関数
+    指定されたプロンプトに基づいた回答を取得する関数。
     
-    ※今回のモデルでは、"temperature" や "maxOutputTokens" などはサポートされていないため、
-      必要最低限の "contents" キーのみを含むペイロードを送信します。
+    ※今回のモデルでは、"temperature" や "maxOutputTokens" はサポートされていないため、
+      必要最低限の "contents" キーのみを含むペイロードを送信する。
     """
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite-preview-02-05:generateContent?key={API_KEY}"
     payload = {
@@ -70,7 +67,7 @@ def call_gemini_api(prompt):
 
 def generate_initial_answers(question, persona_params):
     """
-    ユーザーの初回質問に対して、各ペルソナの回答を生成する関数
+    ユーザーの初回質問に対して、各ペルソナの回答を生成する関数。
     """
     answers = {}
     for persona, params in persona_params.items():
@@ -86,26 +83,33 @@ def generate_initial_answers(question, persona_params):
 
 def simulate_persona_discussion(answers):
     """
-    初回回答をもとに、ペルソナ同士が実際の人間の会話のように、
-    ゆっくりと丁寧に議論している様子をシミュレーションする関数
+    各ペルソナの初回回答をもとに、実際の人間の会話のように、  
+    ゆっくり丁寧に議論している様子をシミュレーションする関数。
+    
+    ※以下のプロンプトでは、出力を次の形式で求める：
+      - 各行は「ペルソナ1: 発言内容」「ペルソナ2: 発言内容」と短い一文で記述。
+      - JSON等の余分な記述は含まず、シンプルな対話形式にする。
+      - 会話中に「…」や短い沈黙表現も含むようにする。
     """
-    # 自然な人間会話の指示を加えたプロンプト例
     discussion_prompt = (
-        "以下は、各ペルソナがまるで友達同士の会話のように、ゆっくりと丁寧に議論している状況です。"
-        "ペルソナは、一言ずつ順番に話し、相手の意見に共感しながら、自分の考えを述べています。"
-        "会話の途中で、少し間をおいて「…」といった表現や、沈黙のタイミングも含めてください。"
-        "また、自然な流れの中でユーザーへの追加質問も行ってください。\n\n"
+        "次の各ペルソナの初回回答をもとに、友達同士がゆっくりと話している会話を作ってください。\n"
     )
     for persona, answer in answers.items():
-        discussion_prompt += f"{persona}の初回回答: {answer}\n\n"
-    discussion_prompt += "以上の内容を踏まえ、ペルソナ同士が実際に人間のように、ゆっくりと会話している様子を示してください。"
+        discussion_prompt += f"{persona}の初回回答: {answer}\n"
+    discussion_prompt += (
+        "\n出力形式：\n"
+        "ペルソナ1: 短い一文\n"
+        "ペルソナ2: 短い一文\n"
+        "ペルソナ3: 短い一文\n"
+        "※各行は一つの発言で、会話全体がシンプルな対話形式になるようにしてください。"
+    )
     
     discussion = call_gemini_api(discussion_prompt)
     return discussion
 
 def generate_followup_question(discussion):
     """
-    ペルソナ間のディスカッションの結果から、ユーザーに対するフォローアップ質問を抽出または生成する関数
+    ペルソナ間のディスカッションから、ユーザーへのフォローアップ質問を抽出または生成する関数。
     """
     if "？" in discussion:
         followup = discussion.split("？")[0] + "？"
@@ -121,18 +125,16 @@ question = st.text_area("最初の質問を入力してください", placeholde
 
 if st.button("送信"):
     if question:
-        # 質問内容に応じたパラメーター自動調整
+        # 内部処理としてパラメーター自動調整
         persona_params = adjust_parameters(question)
-        st.write("### 自動調整された各ペルソナのパラメーター")
-        st.json(persona_params)
         
-        # 各ペルソナからの初回回答生成
+        # 各ペルソナの初回回答生成
         st.write("### 各ペルソナからの初回回答")
         initial_answers = generate_initial_answers(question, persona_params)
         for persona, answer in initial_answers.items():
             st.markdown(f"**{persona}**: {answer}")
 
-        # ペルソナ間のディスカッションシミュレーション
+        # ペルソナ間の会話シミュレーション（UDスタイルの対話形式）
         st.write("### ペルソナ間のディスカッション")
         discussion = simulate_persona_discussion(initial_answers)
         st.markdown(discussion)
