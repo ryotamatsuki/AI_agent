@@ -6,9 +6,8 @@ import random
 # ========================
 #    定数／設定
 # ========================
-API_KEY = "AIzaSyCyHFSCTYR9T0a5zPn9yg-49eevJXqKP9g"  # gemini-1.5-flash 用 API キー
+API_KEY = "YOUR_GEMINI_API_KEY"  # gemini-1.5-flash 用 API キー
 MODEL_NAME = "gemini-1.5-flash"
-# 3人の日本人の名前（固定）
 NAMES = ["ゆかり", "しんや", "みのる"]
 
 # ========================
@@ -69,7 +68,9 @@ def call_gemini_api(prompt: str) -> str:
         candidate0 = candidates[0]
         content_val = candidate0.get("content", "")
         if isinstance(content_val, dict):
-            content_str = content_val.get("value", "")
+            # parts 内の text を連結する
+            parts = content_val.get("parts", [])
+            content_str = " ".join([p.get("text", "") for p in parts])
         else:
             content_str = str(content_val)
         content_str = content_str.strip()
@@ -84,7 +85,7 @@ def generate_discussion(question: str, persona_params: dict) -> str:
     for name, params in persona_params.items():
         prompt += f"{name}は【{params['style']}な視点】で、{params['detail']}。\n"
     prompt += (
-        "\n上記情報を元に、3人が友達同士のように自然な会話をしてください。\n"
+        "\n上記情報を元に、3人が友達同士の自然な会話をしてください。\n"
         "出力形式は以下の通りです。\n"
         "ゆかり: 発言内容\n"
         "しんや: 発言内容\n"
@@ -103,15 +104,11 @@ def generate_summary(discussion: str) -> str:
     return call_gemini_api(prompt)
 
 def display_line_style(text: str):
-    """
-    会話の各行を改行で分割し、LINE風の吹き出し形式で表示する。
-    各キャラクターごとに背景色、文字色、フォントを指定。
-    """
     lines = text.split("\n")
     color_map = {
-        "ゆかり": {"bg": "#DCF8C6", "color": "#333"},
-        "しんや": {"bg": "#E0F7FA", "color": "#333"},
-        "みのる": {"bg": "#FCE4EC", "color": "#333"}
+        "ゆかり": "#DCF8C6",
+        "しんや": "#E0F7FA",
+        "みのる": "#FCE4EC"
     }
     for line in lines:
         line = line.strip()
@@ -124,9 +121,7 @@ def display_line_style(text: str):
         else:
             name = ""
             message = line
-        styles = color_map.get(name, {"bg": "#F5F5F5", "color": "#333"})
-        bg_color = styles["bg"]
-        text_color = styles["color"]
+        bg_color = color_map.get(name, "#F5F5F5")
         bubble_html = f"""
         <div style="
             background-color: {bg_color};
@@ -135,8 +130,6 @@ def display_line_style(text: str):
             padding:8px;
             margin:5px 0;
             width: fit-content;
-            color: {text_color};
-            font-family: Arial, sans-serif;
         ">
             <strong>{name}</strong><br>
             {message}
@@ -147,29 +140,25 @@ def display_line_style(text: str):
 # ========================
 #    Streamlit アプリ
 # ========================
-st.title("ぼくのともだち - 自然な会話")
+st.title("ぼくのともだち")
 
-# --- 質問入力エリア ---
 question = st.text_area("質問を入力してください", placeholder="例: 官民共創施設の名前を考えてください。", height=150)
 
-# セッション状態の初期化
 if "discussion" not in st.session_state:
     st.session_state["discussion"] = ""
 if "summary" not in st.session_state:
     st.session_state["summary"] = ""
 
-# --- 会話生成ボタン ---
 if st.button("会話を開始"):
     if question.strip():
         persona_params = adjust_parameters(question)
         discussion = generate_discussion(question, persona_params)
-        st.session_state["discussion"] = discussion  # 会話履歴として保存
+        st.session_state["discussion"] = discussion
         st.write("### 3人の会話")
         display_line_style(discussion)
     else:
         st.warning("質問を入力してください。")
 
-# --- まとめ回答生成ボタン ---
 if st.button("会話をまとめる"):
     if st.session_state["discussion"]:
         summary = generate_summary(st.session_state["discussion"])
