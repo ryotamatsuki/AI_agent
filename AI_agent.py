@@ -3,7 +3,7 @@ import requests
 import re
 
 # Gemini API のエンドポイント（gemini-1.5-flash を使用）
-API_KEY = "AIzaSyBTNVkzjKD3sUNVUMlp_tcXWQMO-FpfrSo"
+API_KEY = "YOUR_GEMINI_API_KEY"
 
 def analyze_question(question):
     """
@@ -49,23 +49,34 @@ def call_gemini_api(prompt):
         }]
     }
     headers = {"Content-Type": "application/json"}
-    response = requests.post(url, json=payload, headers=headers)
-    if response.status_code == 200:
-        candidates = response.json().get("candidates", [])
-        if candidates:
-            return candidates[0].get("content", "回答が見つかりませんでした。")
+
+    try:
+        response = requests.post(url, json=payload, headers=headers)
+    except Exception as e:
+        return f"エラー: リクエスト送信中に例外が発生しました -> {str(e)}"
+
+    # 通信に成功しても、返ってくるレスポンスボディが意図したものとは限らないので例外処理を追加
+    try:
+        if response.status_code == 200:
+            rjson = response.json()
+            candidates = rjson.get("candidates", [])
+            if candidates:
+                return candidates[0].get("content", "回答が見つかりませんでした。")
+            else:
+                return "回答が見つかりませんでした。"
         else:
-            return "回答が見つかりませんでした。"
-    else:
-        return f"エラー: {response.status_code} {response.text}"
+            return f"エラー: {response.status_code} {response.text}"
+    except Exception as e:
+        # JSON 解析などで失敗した場合
+        return f"エラー: レスポンスの解析に失敗しました -> {str(e)}"
 
 def truncate_text(text, limit=50):
     """
     テキストを前後の空白を除去し、指定文字数（デフォルト50文字）に収まるように切り詰める。
-    text が None の場合は空文字列を返す。
+    text が None または空文字の場合は空文字列として扱う。
     """
-    if text is None:
-        return ""
+    if not text:  # None や "" の場合をまとめて対処
+        text = ""
     t = text.strip().replace("\n", " ")
     return t if len(t) <= limit else t[:limit] + "…"
 
@@ -124,7 +135,9 @@ def display_discussion_in_boxes(discussion):
         line = line.strip()
         if line:
             st.markdown(
-                f"""<div style="border:1px solid #ddd; border-radius:5px; padding:8px; margin-bottom:8px;">{line}</div>""",
+                f"""<div style="border:1px solid #ddd; border-radius:5px; padding:8px; margin-bottom:8px;">
+                {line}
+                </div>""",
                 unsafe_allow_html=True
             )
 
@@ -145,7 +158,7 @@ if st.button("送信"):
         for persona, answer in initial_answers.items():
             st.markdown(f"**{persona}**: {answer}")
         
-        # ペルソナ間の会話シミュレーション（UDスタイルの対話形式）
+        # ペルソナ間の会話シミュレーション（短い一文ずつの対話形式）
         st.write("### ペルソナ間のディスカッション")
         discussion = simulate_persona_discussion(initial_answers)
         display_discussion_in_boxes(discussion)
