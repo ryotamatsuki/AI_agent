@@ -6,7 +6,7 @@ import random
 # ========================
 #    定数／設定
 # ========================
-API_KEY = "YOUR_GEMINI_API_KEY"  # gemini-1.5-flash 用 API キー
+API_KEY = "AIzaSyCyHFSCTYR9T0a5zPn9yg-49eevJXqKP9g"  # gemini-1.5-flash 用 API キー
 MODEL_NAME = "gemini-1.5-flash"
 NAMES = ["ゆかり", "しんや", "みのる"]
 
