@@ -3,36 +3,45 @@ import requests
 import re
 
 # ========================
-#   設定エリア
+#    定数／設定
 # ========================
-API_KEY = "AIzaSyCyHFSCTYR9T0a5zPn9yg-49eevJXqKP9g"  # gemini-1.5-flash 用 API キー
-
-# モデル名
+API_KEY = "YOUR_GEMINI_API_KEY"  # gemini-1.5-flash 用 API キー
 MODEL_NAME = "gemini-1.5-flash"
 
-# 3人の日本人名
-NAMES = ["ゆかり", "しんや", "みのる"]
+# 質問を分析してキャラクター設定を変える用 (任意の関数)
+def analyze_question(question: str) -> int:
+    score = 0
+    keywords_emotional = ["困った", "悩み", "苦しい", "辛い"]
+    keywords_logical = ["理由", "原因", "仕組み", "方法"]
+    for word in keywords_emotional:
+        if re.search(word, question):
+            score += 1
+    for word in keywords_logical:
+        if re.search(word, question):
+            score -= 1
+    return score
 
-# ========================
-#   関数定義
-# ========================
-
-def remove_json_artifacts(text: str) -> str:
+def adjust_parameters(question: str) -> dict:
     """
-    モデルが JSON 形式や 'parts': [{'text': ...}], 'role': 'model' などの情報を返した場合、
-    正規表現で取り除く簡易処理。
+    質問内容に応じて、3名の視点（style, detail）を自動調整する。
     """
-    if not isinstance(text, str):
-        text = str(text) if text else ""
-    # 'parts': [{'text': ... }] などを除去
-    pattern = r"'parts': \[\{'text':.*?\}\], 'role': 'model'"
-    cleaned = re.sub(pattern, "", text, flags=re.DOTALL)
-    return cleaned.strip()
+    score = analyze_question(question)
+    persona_params = {}
+    if score > 0:
+        # 感情寄りの回答を重視
+        persona_params["ゆかり"] = {"style": "情熱的", "detail": "感情に寄り添う回答"}
+        persona_params["しんや"] = {"style": "共感的", "detail": "心情を重視した解説"}
+        persona_params["みのる"] = {"style": "柔軟", "detail": "状況に合わせた多面的な視点"}
+    else:
+        # 論理寄りの回答を重視
+        persona_params["ゆかり"] = {"style": "論理的", "detail": "具体的な解説を重視"}
+        persona_params["しんや"] = {"style": "分析的", "detail": "データや事実を踏まえた説明"}
+        persona_params["みのる"] = {"style": "客観的", "detail": "中立的な視点からの考察"}
+    return persona_params
 
 def call_gemini_api(prompt: str) -> str:
     """
-    gemini-1.5-flash モデルを呼び出し、指定されたプロンプトに対する回答を取得する。
-    content が dict の場合は 'value' キーなどを取り出す。
+    gemini-1.5-flash モデルを呼び出し、指定されたプロンプトに基づく会話テキストを取得。
     """
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent?key={API_KEY}"
     payload = {
@@ -45,10 +54,10 @@ def call_gemini_api(prompt: str) -> str:
     try:
         response = requests.post(url, json=payload, headers=headers)
     except Exception as e:
-        return f"エラー: リクエスト送信失敗 -> {str(e)}"
+        return f"エラー: リクエスト送信時に例外が発生しました -> {str(e)}"
 
     if response.status_code != 200:
-        return f"エラー: {response.status_code} -> {response.text}"
+        return f"エラー: ステータスコード {response.status_code} -> {response.text}"
 
     try:
         rjson = response.json()
@@ -56,165 +65,84 @@ def call_gemini_api(prompt: str) -> str:
         if not candidates:
             return "回答が見つかりません。(candidatesが空)"
 
-        # 最初の候補を取得
-        candidate0 = candidates[0]
-        content_val = candidate0.get("content", "")
-        # 'content' が辞書の場合への対処
+        content_val = candidates[0].get("content", "")
+        # 辞書かもしれないので対処
         if isinstance(content_val, dict):
-            # もし 'value' 等があれば取得
             content_str = content_val.get("value", "")
         else:
             content_str = str(content_val)
-
         content_str = content_str.strip()
         if not content_str:
             return "回答が見つかりません。(contentが空)"
-
-        # 不要な JSON 表記を除去
         return remove_json_artifacts(content_str)
-
     except Exception as e:
-        return f"エラー: JSON解析失敗 -> {str(e)}"
+        return f"エラー: レスポンス解析に失敗しました -> {str(e)}"
 
-def generate_answer(name: str, question: str) -> str:
+def remove_json_artifacts(text: str) -> str:
     """
-    個別に、指定した名前が質問に回答する形で呼び出す。
+    'parts': [{'text': ...}] や 'role': 'model' などを簡易的に除去
     """
-    prompt = (
-        f"{name}が以下の質問について回答してください。\n"
-        f"質問: {question}\n"
-        "文字数制限はありません。余計な JSON は不要です。"
-    )
-    return call_gemini_api(prompt)
+    if not isinstance(text, str):
+        text = str(text) if text else ""
+    pattern = r"'parts': \[\{'text':.*?\}\], 'role': 'model'"
+    cleaned = re.sub(pattern, "", text, flags=re.DOTALL)
+    return cleaned.strip()
 
-def generate_discussion(names_answers: dict) -> str:
+def generate_discussion(question: str, persona_params: dict) -> str:
     """
-    3人の初回回答をもとに、自然な会話を生成する。
+    いきなり3人が質問についてディスカッションするプロンプトを生成。
     """
-    prompt = "以下は3人の初回回答です。\n"
-    for nm, ans in names_answers.items():
-        prompt += f"{nm}: {ans}\n"
+    # 3名のスタイルを活かして、自由に会話してもらう
+    prompt = "以下の情報を元に、3人がユーザーの質問について自然な会話をしてください。\n"
+    prompt += f"ユーザーの質問: {question}\n\n"
+
+    for name, params in persona_params.items():
+        prompt += (
+            f"{name}は【{params['style']}な視点】で、{params['detail']}。\n"
+        )
 
     prompt += (
-        "\nこの3人が友達同士のように、ユーザーの話題について話し合ってください。"
-        "「名前: 発言」の形式で、LINE風の短いやりとりを日本語で出力してください。\n"
-        "余計な JSON は入れず、自然な文章のみをお願いします。"
+        "\n出力形式は以下:\n"
+        "ゆかり: 会話内容\n"
+        "しんや: 会話内容\n"
+        "みのる: 会話内容\n"
+        "余計なJSONや'parts'などは不要。自由に話し合ってください。"
     )
     return call_gemini_api(prompt)
 
-def display_line_style(discussion: str):
+def display_discussion_in_boxes(discussion: str):
     """
-    discussion を改行で分割し、「名前: 内容」をパースして LINE風吹き出しを表示する。
+    会話結果を各行ごとに枠で囲んで表示する。
     """
     lines = discussion.split("\n")
-
-    # 吹き出しカラーを名前ごとに分ける（好みで変更可）
-    color_map = {
-        "ゆかり": "#DCF8C6",  # 薄い緑
-        "しんや": "#E0F7FA",  # 薄い水色
-        "みのる": "#FCE4EC",  # 薄いピンク
-    }
-
     for line in lines:
         line = line.strip()
-        if not line:
-            continue
-
-        # 「名前: 内容」の形式をパース
-        # 例： "ゆかり: なるほど、いいね。"
-        matched = re.match(r"^(.*?)\s*:\s*(.*)$", line)
-        if matched:
-            name = matched.group(1)
-            message = matched.group(2)
-        else:
-            # もし上記形式でないなら、そのまま表示
-            name = ""
-            message = line
-
-        # 吹き出しの背景色を名前別に設定 (無かったらグレーに)
-        bg_color = color_map.get(name, "#F5F5F5")
-
-        # HTML で吹き出し風の見た目に
-        bubble_html = f"""
-        <div style="
-            background-color: {bg_color}; 
-            display: inline-block; 
-            border-radius: 10px; 
-            padding: 8px; 
-            margin: 5px 0;
-        ">
-            <strong style="color: #000;">{name}</strong><br>
-            {message}
-        </div>
-        """
-        st.markdown(bubble_html, unsafe_allow_html=True)
+        if line:
+            st.markdown(
+                f"""<div style="border:1px solid #ddd; border-radius:5px; padding:8px; margin-bottom:8px;">
+                {line}
+                </div>""",
+                unsafe_allow_html=True
+            )
 
 # ========================
-#   Streamlit アプリ
+#    Streamlit アプリ
 # ========================
-st.title("ぼくのともだち - 日本人名＆LINE風表示")
+st.title("ぼくのともだち - いきなりディスカッション版")
 
-if "names" not in st.session_state:
-    # 3名を固定 (ユーザーが変更したい場合はここを動的にしてもOK)
-    st.session_state["names"] = NAMES
+# 質問を入力
+question = st.text_area("3人が一緒に考える質問を入力してください。", placeholder="例: 官民共創施設の名前を考えてください。")
 
-if "initial_answers" not in st.session_state:
-    st.session_state["initial_answers"] = {}
+# 送信ボタン → ディスカッション直接生成
+if st.button("ディスカッション"):
+    if question.strip():
+        # 質問を解析してパラメーター調整
+        persona_params = adjust_parameters(question)
 
-if "discussion" not in st.session_state:
-    st.session_state["discussion"] = ""
+        # いきなり3人のディスカッション生成
+        discussion = generate_discussion(question, persona_params)
 
-# 1. 質問を入力
-question = st.text_area("最初の質問を入力してください", placeholder="例: 官民共創施設の名前を考えてください。")
-
-# 2. 初回回答取得ボタン
-if st.button("初回回答を取得"):
-    if not question.strip():
+        st.write("### 3人のディスカッション")
+        display_discussion_in_boxes(discussion)
+    else:
         st.warning("質問を入力してください。")
-    else:
-        # 3人それぞれの回答を取得
-        answers_dict = {}
-        for nm in st.session_state["names"]:
-            ans = generate_answer(nm, question)
-            answers_dict[nm] = ans
-        
-        st.session_state["initial_answers"] = answers_dict
-        st.session_state["discussion"] = ""  # 会話履歴初期化
-
-        st.write("### 初回回答")
-        for nm, ans in answers_dict.items():
-            # LINE風で表示
-            st.markdown(f"**{nm}**: {ans}")
-
-# 3. 会話を進めるボタン
-if st.button("会話を進める"):
-    if not st.session_state["initial_answers"]:
-        st.warning("先に『初回回答を取得』を押してください。")
-    else:
-        # これまでの会話 + 新たなディスカッション
-        new_discussion = generate_discussion(st.session_state["initial_answers"])
-        # 連結して履歴に追加
-        st.session_state["discussion"] += "\n" + new_discussion
-
-        st.write("### 3人の会話 (LINE風)")
-        display_line_style(st.session_state["discussion"])
-
-# 4. ユーザー追加入力
-user_follow = st.text_input("彼らの会話に追加で伝えたいこと")
-
-if st.button("追加回答を踏まえて会話を継続"):
-    if not st.session_state["discussion"]:
-        st.warning("まずは『会話を進める』を押して、会話を開始してください。")
-    else:
-        # 追加発言を踏まえて再度モデルへ
-        prompt_cont = (
-            f"これまでの会話:\n{st.session_state['discussion']}\n\n"
-            f"ユーザーからの追加発言: {user_follow}\n"
-            "この情報を踏まえ、3人がさらに会話を続けます。\n"
-            "名前: 内容 の形式で、LINEのように自然なやりとりをお願いします。"
-        )
-        cont_result = call_gemini_api(prompt_cont)
-        st.session_state["discussion"] += "\n" + cont_result
-
-        st.write("### 更新された会話")
-        display_line_style(st.session_state["discussion"])
