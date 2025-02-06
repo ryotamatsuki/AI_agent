@@ -5,7 +5,7 @@ import random
 
 API_KEY = "AIzaSyDfyltY3n2p8Ia4qrWJKk8gU8ZBTxsGKWI"  # gemini-1.5-flash 用の有効な API キー
 
-NAMES = ["たかし", "ゆかり", "りな", "けんじ", "あやこ", "みのる", "しんや", "さとみ"]
+NAMES = ["かいと", "ゆかり", "りな", "けんじ", "あやこ", "みのる", "しんや", "さとみ"]
 
 def call_gemini_api(prompt: str) -> str:
     """
@@ -127,7 +127,7 @@ def simulate_discussion(user_question: str, answers: dict, existing_discussion: 
     return cleaned
 
 # Streamlit アプリ開始
-st.title("ぼくのともだち - 日本人の名前で会話する")
+st.title("ぼくのともだち")
 
 # Session State 初期化
 if "names" not in st.session_state:
