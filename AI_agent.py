@@ -62,13 +62,16 @@ def call_gemini_api(prompt):
 def truncate_text(text, limit=50):
     """
     テキストを前後の空白を除去し、指定文字数（デフォルト50文字）に収まるように切り詰める。
+    text が None の場合は空文字列を返す。
     """
+    if text is None:
+        return ""
     t = text.strip().replace("\n", " ")
     return t if len(t) <= limit else t[:limit] + "…"
 
 def generate_initial_answers(question, persona_params):
     """
-    ユーザーの初回質問に対し、各ペルソナの回答を生成する。
+    ユーザーの初回質問に対して、各ペルソナの回答を生成する。
     回答は余計な推論を含まず、50文字程度に短くまとめる。
     """
     answers = {}
@@ -86,12 +89,10 @@ def generate_initial_answers(question, persona_params):
 
 def simulate_persona_discussion(answers):
     """
-    各ペルソナの初回回答をもとに、実際の人間の会話のように、
-    ゆっくり丁寧に短い一文ずつの対話形式（UDスタイル）で議論する会話を生成する。
-    
-    出力形式は各行「ペルソナX: 発言内容」とし、各発言は短い一文。
+    各ペルソナの初回回答をもとに、友達同士がゆっくりと話している自然な会話を生成する。
+    出力は「ペルソナ1: 発言内容」など、各発言を短い一文で表現する形式。
     """
-    discussion_prompt = "次の各ペルソナの初回回答をもとに、友達同士がゆっくりと話している自然な会話を作ってください。\n"
+    discussion_prompt = "次の各ペルソナの初回回答をもとに、友達同士がゆっくりと話している会話を作ってください。\n"
     for persona, answer in answers.items():
         discussion_prompt += f"{persona}の初回回答: {answer}\n"
     discussion_prompt += (
@@ -106,7 +107,7 @@ def simulate_persona_discussion(answers):
 
 def generate_followup_question(discussion):
     """
-    ペルソナ間のディスカッションからユーザーへのフォローアップ質問を抽出または生成する。
+    ペルソナ間のディスカッションから、ユーザーへのフォローアップ質問を抽出または生成する。
     """
     if "？" in discussion:
         followup = discussion.split("？")[0] + "？"
