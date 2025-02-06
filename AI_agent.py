@@ -3,7 +3,7 @@ import requests
 import re
 
 # Gemini API のエンドポイント（gemini-1.5-flash を使用）
-API_KEY = "YOUR_GEMINI_API_KEY"
+API_KEY = "AIzaSyBTNVkzjKD3sUNVUMlp_tcXWQMO-FpfrSo"
 
 def analyze_question(question):
     """
