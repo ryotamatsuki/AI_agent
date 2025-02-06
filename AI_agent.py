@@ -8,52 +8,29 @@ import random
 # ========================
 API_KEY = "AIzaSyCyHFSCTYR9T0a5zPn9yg-49eevJXqKP9g"  # gemini-1.5-flash 用 API キー
 MODEL_NAME = "gemini-1.5-flash"
-# 3人の日本人名
+
+# 3人の日本人の名前（固定）
 NAMES = ["ゆかり", "しんや", "みのる"]
 
 # ========================
 #    関数定義
 # ========================
 
-def analyze_question(question: str) -> int:
+def remove_json_artifacts(text: str) -> str:
     """
-    質問内容に含まれるキーワードから、
-    感情寄り（例："困った", "悩み", "苦しい", "辛い"）や
-    論理寄り（例："理由", "原因", "仕組み", "方法"）を判定するためのスコアを算出する。
-    感情的なキーワードが多い場合は正のスコア、論理的なキーワードが多い場合は負のスコアを返す。
+    モデルが返す不要なJSON形式や 'parts': [{'text': ...}], 'role': 'model'
+    の表記を取り除く。
     """
-    score = 0
-    keywords_emotional = ["困った", "悩み", "苦しい", "辛い"]
-    keywords_logical = ["理由", "原因", "仕組み", "方法"]
-    for word in keywords_emotional:
-        if re.search(word, question):
-            score += 1
-    for word in keywords_logical:
-        if re.search(word, question):
-            score -= 1
-    return score
-
-def adjust_parameters(question: str) -> dict:
-    """
-    質問内容に応じて、各キャラクターのスタイルと詳細文を自動調整する。
-    analyze_question 関数のスコアに応じ、感情寄りか論理寄りかを決定。
-    """
-    score = analyze_question(question)
-    persona_params = {}
-    if score > 0:
-        persona_params["ゆかり"] = {"style": "情熱的", "detail": "感情に寄り添う回答"}
-        persona_params["しんや"] = {"style": "共感的", "detail": "心情を重視した解説"}
-        persona_params["みのる"] = {"style": "柔軟", "detail": "状況に合わせた多面的な視点"}
-    else:
-        persona_params["ゆかり"] = {"style": "論理的", "detail": "具体的な解説を重視"}
-        persona_params["しんや"] = {"style": "分析的", "detail": "データや事実を踏まえた説明"}
-        persona_params["みのる"] = {"style": "客観的", "detail": "中立的な視点からの考察"}
-    return persona_params
+    if not isinstance(text, str):
+        text = str(text) if text else ""
+    pattern = r"'parts': \[\{'text':.*?\}\], 'role': 'model'"
+    cleaned = re.sub(pattern, "", text, flags=re.DOTALL)
+    return cleaned.strip()
 
 def call_gemini_api(prompt: str) -> str:
     """
-    gemini-1.5-flash モデルを呼び出し、指定されたプロンプトに基づく回答を取得する。
-    失敗時や空回答時も必ず文字列を返すようにし、content が辞書の場合は 'value' キーを取り出す。
+    gemini-1.5-flash モデルを呼び出し、指定されたプロンプトに基づく回答（会話文）を取得する。
+    エラーや空回答の場合でも必ず文字列を返すようにする。
     """
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent?key={API_KEY}"
     payload = {
@@ -62,6 +39,7 @@ def call_gemini_api(prompt: str) -> str:
         }]
     }
     headers = {"Content-Type": "application/json"}
+
     try:
         response = requests.post(url, json=payload, headers=headers)
     except Exception as e:
@@ -88,31 +66,24 @@ def call_gemini_api(prompt: str) -> str:
     except Exception as e:
         return f"エラー: レスポンス解析に失敗しました -> {str(e)}"
 
-def remove_json_artifacts(text: str) -> str:
-    """
-    モデルが返す不要なJSON形式（例: 'parts': [{'text': ...}], 'role': 'model'）を取り除く。
-    """
-    if not isinstance(text, str):
-        text = str(text) if text else ""
-    pattern = r"'parts': \[\{'text':.*?\}\], 'role': 'model'"
-    cleaned = re.sub(pattern, "", text, flags=re.DOTALL)
-    return cleaned.strip()
-
 def generate_discussion(question: str, persona_params: dict) -> str:
     """
-    ユーザーの質問と各キャラクターのスタイル情報をもとに、3人が自由に会話するプロンプトを作成し、結果を返す。
-    出力形式は「ゆかり: 発言」「しんや: 発言」「みのる: 発言」とし、余計なJSON形式は不要。
+    ユーザーの質問と各キャラクターのスタイル情報をもとに、3人が
+    自然な会話（友達同士の会話のような、雑談的でありながらも普段の会話の流れ）
+    を行うよう指示するプロンプトを生成し、結果を返す。
     """
-    prompt = f"ユーザーの質問: {question}\n\n"
+    prompt = f"【ユーザーの質問】\n{question}\n\n"
+    # 各キャラクターの情報を提示
     for name, params in persona_params.items():
         prompt += f"{name}は【{params['style']}な視点】で、{params['detail']}。\n"
     prompt += (
-        "\n上記情報を基に、3人が友達同士のように会話してください。\n"
-        "出力形式は以下の通りです。\n"
+        "\n上記情報を踏まえ、以下の形式で友達同士が自然に会話してください。\n"
+        "形式：\n"
         "ゆかり: 発言内容\n"
         "しんや: 発言内容\n"
         "みのる: 発言内容\n"
-        "余計なJSON形式は不要です。"
+        "できるだけ普段の会話のような、自然な流れで話してください。"
+        "余計なJSON表記や技術的な記述は不要です。"
     )
     return call_gemini_api(prompt)
 
@@ -121,17 +92,32 @@ def generate_summary(discussion: str) -> str:
     生成された3人の会話全体をもとに、会話のまとめ回答を生成するプロンプトを作成し、結果を返す。
     """
     prompt = (
-        "以下は3人の会話です。\n"
+        "以下は3人の会話内容です。\n"
         f"{discussion}\n\n"
-        "この会話を踏まえて、質問に対するまとめ回答を生成してください。\n"
-        "自由な日本語文で出力し、余計なJSON形式は不要です。"
+        "上記の会話を踏まえて、質問に対するまとめ回答を生成してください。\n"
+        "自然な日本語文で出力し、余計なJSON表記は不要です。"
     )
     return call_gemini_api(prompt)
 
+def adjust_parameters(question: str) -> dict:
+    """
+    質問内容に応じて、3人それぞれのキャラクター設定（style, detail）を自動調整する。
+    """
+    score = analyze_question(question)
+    params = {}
+    if score > 0:
+        params["ゆかり"] = {"style": "情熱的", "detail": "感情に寄り添う回答"}
+        params["しんや"] = {"style": "共感的", "detail": "心情を重視した解説"}
+        params["みのる"] = {"style": "柔軟", "detail": "状況に合わせた多面的な視点"}
+    else:
+        params["ゆかり"] = {"style": "論理的", "detail": "具体的な解説を重視"}
+        params["しんや"] = {"style": "分析的", "detail": "データや事実を踏まえた説明"}
+        params["みのる"] = {"style": "客観的", "detail": "中立的な視点からの考察"}
+    return params
+
 def display_line_style(text: str):
     """
-    会話の各行を改行で分割し、LINE風の吹き出し形式で表示する。
-    各キャラクターごとに背景色を変えています。
+    生成された会話の各行を改行で分割し、LINE風の吹き出し形式で表示する。
     """
     lines = text.split("\n")
     color_map = {
@@ -154,10 +140,10 @@ def display_line_style(text: str):
         bubble_html = f"""
         <div style="
             background-color: {bg_color};
-            border: 1px solid #ddd;
-            border-radius: 10px;
-            padding: 8px;
-            margin: 5px 0;
+            border:1px solid #ddd;
+            border-radius:10px;
+            padding:8px;
+            margin:5px 0;
             width: fit-content;
         ">
             <strong>{name}</strong><br>
@@ -169,9 +155,9 @@ def display_line_style(text: str):
 # ========================
 #    Streamlit アプリ
 # ========================
-st.title("ぼくのともだち")
+st.title("ぼくのともだち - 自然な会話版")
 
-# ユーザーの質問入力エリア
+# --- 質問入力エリア ---
 question = st.text_area("質問を入力してください", placeholder="例: 官民共創施設の名前を考えてください。", height=150)
 
 # セッション状態の初期化
@@ -180,19 +166,18 @@ if "discussion" not in st.session_state:
 if "summary" not in st.session_state:
     st.session_state["summary"] = ""
 
-# 3人のキャラクターのスタイル設定を、質問に応じて自動調整
+# --- 会話生成ボタン ---
 if st.button("会話を開始"):
     if question.strip():
         persona_params = adjust_parameters(question)
-        # 3人によるディスカッション生成
         discussion = generate_discussion(question, persona_params)
-        st.session_state["discussion"] = discussion  # 会話履歴として保存
+        st.session_state["discussion"] = discussion  # 履歴として保存
         st.write("### 3人の会話")
         display_line_style(discussion)
     else:
         st.warning("質問を入力してください。")
 
-# まとめ回答生成ボタン
+# --- まとめ回答生成ボタン ---
 if st.button("会話をまとめる"):
     if st.session_state["discussion"]:
         summary = generate_summary(st.session_state["discussion"])
