@@ -2,21 +2,21 @@ import requests
 import concurrent.futures
 import re
 
-# ====== 設定エリア ======
+# ============== 設定エリア ==============
 API_KEYS = [
      "AIzaSyBTNVkzjKD3sUNVUMlp_tcXWQMO-FpfrSo",  # gemini-2.0-flash-001 用
     "AIzaSyDfyltY3n2p8Ia4qrWJKk8gU8ZBTxsGKWI",  # 同じモデルにアクセスする複数のキー
     "AIzaSyCyHFSCTYR9T0a5zPn9yg-49eevJXqKP9g"
 ]
 
-MODEL_NAME = "gemini-2.0-flash-001"
+MODEL_NAME = "gemini-1.5-flash"
 
 # 名前を3人分（ここでは固定）
 NAMES = ["けんじ", "しんや", "たかし"]
 
 def call_gemini_api(prompt: str, api_key: str) -> str:
     """
-    gemini-2.0-flash-001 モデルに対し、指定の api_key を使って呼び出す。
+    gemini-1.5-flash モデルを呼び出し。
     'content' が辞書の場合は 'value' を取り出して文字列化。
     """
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent?key={api_key}"
@@ -35,7 +35,7 @@ def call_gemini_api(prompt: str, api_key: str) -> str:
     except Exception as e:
         return f"エラー: リクエスト送信失敗 -> {str(e)}"
 
-    print("[DEBUG] Status:", response.status_code)
+    print("[DEBUG] Status code:", response.status_code)
     print("[DEBUG] Response:", response.text)
 
     if response.status_code != 200:
@@ -45,14 +45,12 @@ def call_gemini_api(prompt: str, api_key: str) -> str:
         rjson = response.json()
         candidates = rjson.get("candidates", [])
         if not candidates:
-            return "回答が見つかりません。(candidates空)"
+            return "回答が見つかりません。(candidatesが空)"
 
-        # 最初の候補から content を取り出す
         candidate0 = candidates[0]
         content_val = candidate0.get("content", "")
+        # gemini-1.5-flash でも 'content' が dict の場合があるかもしれないので対策
         if isinstance(content_val, dict):
-            # { "parts": [...], "role": ... } のようなケース
-            # さらに "value" がある場合は取り出す (可能性あり)
             content_str = content_val.get("value", "")
         else:
             content_str = str(content_val)
@@ -67,7 +65,7 @@ def call_gemini_api(prompt: str, api_key: str) -> str:
 
 def remove_json_artifacts(text: str) -> str:
     """
-    'parts': [{'text': ...}] などを簡易的に除去
+    'parts': [{'text': ...}] や 'role': 'model' などを簡易的に除去
     """
     if not isinstance(text, str):
         text = str(text) if text else ""
@@ -95,11 +93,8 @@ def worker_task(name: str, question: str, api_key: str) -> str:
 
 def main():
     # 例: 3人に同じ質問を並行で投げる
-    question = "官民共創施設を建てたいです。その名前を考えてください。愛媛県庁です。"
+    question = "官民共創施設を建てたいです。その名前を考えてください。"
 
-    # 3つのAPIキーを並列に使う例:
-    # NAMES[i] + API_KEYS[i] でペアにする想定
-    # 数が合わない場合は工夫が必要
     if len(API_KEYS) < 3:
         print("ERROR: API_KEYS が3つ以上必要です。")
         return
