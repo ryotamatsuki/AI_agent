@@ -3,7 +3,7 @@ import requests
 import re
 
 # Gemini API のエンドポイントと API キー（Google Cloud コンソールから発行したキー）
-API_KEY = "AIzaSyBTNVkzjKD3sUNVUMlp_tcXWQMO-FpfrSo"
+API_KEY = "YOUR_GEMINI_API_KEY"
 
 def analyze_question(question):
     """
@@ -60,7 +60,6 @@ def call_gemini_api(prompt):
     headers = {"Content-Type": "application/json"}
     response = requests.post(url, json=payload, headers=headers)
     if response.status_code == 200:
-        # API のレスポンスは candidates 内に生成コンテンツが入っていると仮定
         candidates = response.json().get("candidates", [])
         if candidates:
             return candidates[0].get("content", "回答が見つかりませんでした。")
@@ -75,7 +74,6 @@ def generate_initial_answers(question, persona_params):
     """
     answers = {}
     for persona, params in persona_params.items():
-        # パラメーターはプロンプト内に埋め込みます
         prompt = (
             f"【{params['style']}な視点】\n"
             f"以下の質問に答えてください。\n"
@@ -88,12 +86,19 @@ def generate_initial_answers(question, persona_params):
 
 def simulate_persona_discussion(answers):
     """
-    初回回答をもとに、ペルソナ同士のディスカッションをシミュレーションする関数
+    初回回答をもとに、ペルソナ同士が実際の人間の会話のように、
+    ゆっくりと丁寧に議論している様子をシミュレーションする関数
     """
-    discussion_prompt = "以下の各ペルソナの回答を踏まえて、ディスカッションをしてください。必要に応じてユーザーに追加で質問をしてください。\n"
+    # 自然な人間会話の指示を加えたプロンプト例
+    discussion_prompt = (
+        "以下は、各ペルソナがまるで友達同士の会話のように、ゆっくりと丁寧に議論している状況です。"
+        "ペルソナは、一言ずつ順番に話し、相手の意見に共感しながら、自分の考えを述べています。"
+        "会話の途中で、少し間をおいて「…」といった表現や、沈黙のタイミングも含めてください。"
+        "また、自然な流れの中でユーザーへの追加質問も行ってください。\n\n"
+    )
     for persona, answer in answers.items():
-        discussion_prompt += f"{persona}の回答: {answer}\n"
-    discussion_prompt += "この会話の中で、ユーザーに対して『あなたはこの状況についてどう考えますか？』といった質問を含めてください。"
+        discussion_prompt += f"{persona}の初回回答: {answer}\n\n"
+    discussion_prompt += "以上の内容を踏まえ、ペルソナ同士が実際に人間のように、ゆっくりと会話している様子を示してください。"
     
     discussion = call_gemini_api(discussion_prompt)
     return discussion
