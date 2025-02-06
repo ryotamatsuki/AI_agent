@@ -85,10 +85,22 @@ def truncate_text(text, limit=50) -> str:
     """
     テキストを指定文字数（limit）に収める。text が文字列でない or None の場合は空文字列扱い。
     """
-    if not isinstance(text, str):
-        text = ""
+    if not isinstance(text, str) or not text:
+        return "（回答なし）"  # 万一空の場合は「（回答なし）」と表示
     t = text.strip().replace("\n", " ")
     return t if len(t) <= limit else t[:limit] + "…"
+
+def remove_json_artifacts(text: str) -> str:
+    """
+    モデルが JSON 形式 (例: {'parts': [{'text': ...}], 'role': 'model'}) を
+    返してきた場合、それらを正規表現で取り除く。
+    """
+    # 'parts': [{'text': '...'}], 'role': 'model' などを雑に除去
+    # 単純な例として "'parts': [{'text': ...}]" を取り除く
+    # 必要に応じて細かいカスタマイズが可能
+    pattern = r"'parts': \[\{'text':.*?\}\], 'role': 'model'"
+    cleaned = re.sub(pattern, "", text, flags=re.DOTALL)
+    return cleaned
 
 def generate_initial_answers(question: str, persona_params: dict) -> dict:
     """
@@ -101,49 +113,51 @@ def generate_initial_answers(question: str, persona_params: dict) -> dict:
             f"以下の質問に答えてください。\n"
             f"質問: {question}\n"
             f"詳細: {params['detail']}\n"
-            "回答は50文字程度で、余計な推論を含めないように。"
+            "回答は50文字程度で、余計な推論を含めず、JSON形式も返さないでください。"
         )
         raw_answer = call_gemini_api(prompt)
-        short_answer = truncate_text(raw_answer, 50)
+        # もしモデルが JSON ぽい文字列を返した場合に取り除く
+        cleaned_answer = remove_json_artifacts(raw_answer)
+        short_answer = truncate_text(cleaned_answer, 50)
         answers[persona] = short_answer
         print(f"[DEBUG] {persona} raw_answer:", raw_answer)
+        print(f"[DEBUG] {persona} cleaned_answer:", cleaned_answer)
         print(f"[DEBUG] {persona} short_answer:", short_answer)
     return answers
 
 def simulate_persona_discussion(answers: dict, user_question: str) -> str:
     """
     各ペルソナの初回回答とユーザーの質問を踏まえ、
-    3人が「雑談になりすぎずにユーザーの悩みにフォーカス」する会話を生成する。
+    「雑談になりすぎず、ユーザーの疑問に焦点を当てる」会話を生成する。
     """
-    # ディスカッション用プロンプト
     discussion_prompt = (
-        "ユーザーの質問がこちらです:\n"
+        "ユーザーの質問があります:\n"
         f"【質問】{user_question}\n\n"
-        "次に、各ペルソナの初回回答を示します:\n"
+        "以下に各ペルソナの初回回答を示します。JSON等ではなく、会話形式をお願いします。\n"
     )
     for persona, ans in answers.items():
         discussion_prompt += f"{persona}の初回回答: {ans}\n"
 
     discussion_prompt += (
-        "\n上記の質問と初回回答をもとに、3人が雑談ではなく、"
-        "ユーザーの疑問や悩みにしっかり焦点を当てて話し合ってください。"
-        "必要に応じて追加の質問やアイデアも出してください。\n\n"
-        "【出力形式】\n"
-        "ペルソナ1: 一言 (50文字程度)\n"
-        "ペルソナ2: 一言 (50文字程度)\n"
-        "ペルソナ3: 一言 (50文字程度)\n"
-        "※各行は一度の発言で、余計な記述やJSON形式は不要。\n"
+        "\n上記の質問と初回回答を基に、3人がユーザーの疑問について話し合ってください。"
+        "雑談ではなく、ユーザーの話題に寄り添い、具体的なアイデアや追加質問を提示してください。\n"
+        "出力形式:\n"
+        "ペルソナ1: （短い発言。JSONやpartsなど不要）\n"
+        "ペルソナ2: （短い発言）\n"
+        "ペルソナ3: （短い発言）\n"
+        "※50文字程度で。"
     )
 
     print("[DEBUG] discussion_prompt:", discussion_prompt)
     discussion = call_gemini_api(discussion_prompt)
-    print("[DEBUG] discussion result:", discussion)
-    return discussion
+    # JSONぽい表記があれば削除
+    cleaned = remove_json_artifacts(discussion)
+    print("[DEBUG] discussion result:", cleaned)
+    return cleaned
 
 def generate_followup_question(discussion: str) -> str:
     """
     ペルソナ間のディスカッションからユーザーへのフォローアップ質問を抽出。
-    ディスカッション内に「？」があれば最初の分を提示。それ以外は定型文に。
     """
     if "？" in discussion:
         return discussion.split("？")[0] + "？"
@@ -153,7 +167,6 @@ def generate_followup_question(discussion: str) -> str:
 def display_discussion_in_boxes(discussion: str):
     """
     会話結果を各行ごとに枠で囲み、見やすく表示する。
-    discussion が文字列でない場合は強制的に文字列化。
     """
     if not isinstance(discussion, str):
         discussion = str(discussion) if discussion is not None else ""
@@ -167,7 +180,6 @@ def display_discussion_in_boxes(discussion: str):
                 </div>""",
                 unsafe_allow_html=True
             )
-
 
 # =============== Streamlit アプリケーション ===============
 st.title("ぼくのともだち")
@@ -190,7 +202,7 @@ if st.button("送信"):
         for persona, ans in initial_answers.items():
             st.markdown(f"**{persona}**: {ans}")
 
-        # 3. ペルソナ間のディスカッション（ユーザーの質問を再度提示）
+        # 3. ペルソナ間のディスカッション
         st.write("### ペルソナ間のディスカッション")
         discussion = simulate_persona_discussion(initial_answers, question)
         display_discussion_in_boxes(discussion)
@@ -207,10 +219,11 @@ if st.button("送信"):
             update_prompt = (
                 f"ユーザーからの追加回答: {additional_input}\n"
                 f"先ほどのディスカッション: {discussion}\n"
-                "この情報を踏まえ、今後の会話の方向性について意見を述べてください。"
+                "この情報を踏まえ、今後の会話の方向性について意見を述べてください。\n"
+                "※出力は会話形式で、JSON表記や'parts'などは不要です。"
             )
             updated_discussion = call_gemini_api(update_prompt)
-            display_discussion_in_boxes(updated_discussion)
-
+            cleaned_update = remove_json_artifacts(updated_discussion)
+            display_discussion_in_boxes(cleaned_update)
     else:
         st.warning("質問を入力してください")
