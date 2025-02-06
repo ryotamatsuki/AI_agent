@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 import re
 
-# Gemini API のエンドポイントと API キー（Google Cloud コンソールから発行したキー）
+# Gemini API のエンドポイント（gemini-1.5-flash を使用）
 API_KEY = "AIzaSyBTNVkzjKD3sUNVUMlp_tcXWQMO-FpfrSo"
 
 def analyze_question(question):
@@ -42,13 +42,12 @@ def adjust_parameters(question):
 
 def call_gemini_api(prompt):
     """
-    Google Generative Language API の Gemini モデルを呼び出し、
+    Google Generative Language API の Gemini モデル（gemini-1.5-flash）を呼び出し、
     指定されたプロンプトに基づいた回答を取得する関数。
     
-    ※今回のモデルでは、"temperature" や "maxOutputTokens" はサポートされていないため、
-      必要最低限の "contents" キーのみを含むペイロードを送信する。
+    ※今回のモデルでは、必要最低限の "contents" キーのみを含むペイロードを送信する。
     """
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite-preview-02-05:generateContent?key={API_KEY}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={API_KEY}"
     payload = {
         "contents": [{
             "parts": [{"text": prompt}]
@@ -86,10 +85,7 @@ def simulate_persona_discussion(answers):
     各ペルソナの初回回答をもとに、実際の人間の会話のように、  
     ゆっくり丁寧に議論している様子をシミュレーションする関数。
     
-    ※以下のプロンプトでは、出力を次の形式で求める：
-      - 各行は「ペルソナ1: 発言内容」「ペルソナ2: 発言内容」と短い一文で記述。
-      - JSON等の余分な記述は含まず、シンプルな対話形式にする。
-      - 会話中に「…」や短い沈黙表現も含むようにする。
+    ※以下のプロンプトでは、出力を「ペルソナ1: 発言内容」「ペルソナ2: 発言内容」と短い一文で表記する形式で求める。
     """
     discussion_prompt = (
         "次の各ペルソナの初回回答をもとに、友達同士がゆっくりと話している会話を作ってください。\n"
@@ -101,9 +97,8 @@ def simulate_persona_discussion(answers):
         "ペルソナ1: 短い一文\n"
         "ペルソナ2: 短い一文\n"
         "ペルソナ3: 短い一文\n"
-        "※各行は一つの発言で、会話全体がシンプルな対話形式になるようにしてください。"
+        "※各行は一つの発言で、余分な情報を含まず、シンプルな対話形式にしてください。"
     )
-    
     discussion = call_gemini_api(discussion_prompt)
     return discussion
 
