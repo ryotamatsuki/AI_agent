@@ -3,14 +3,7 @@ import requests
 import re
 
 # Gemini API のエンドポイントと API キー（Google Cloud コンソールから発行したキー）
-API_KEY = "AIzaSyBTNVkzjKD3sUNVUMlp_tcXWQMO-FpfrSo"
-
-# 初期のベースパラメーター（自動調整用の参考値）
-BASE_PARAMS = {
-    "temperature": 0.7,
-    "style": "標準",
-    "detail": "基本的な解説"
-}
+API_KEY = "YOUR_GEMINI_API_KEY"
 
 def analyze_question(question):
     """
@@ -31,38 +24,35 @@ def analyze_question(question):
 
 def adjust_parameters(question):
     """
-    質問の内容に応じてペルソナごとのパラメーターを自動調整する関数
+    質問の内容に応じてペルソナごとのパラメーター（ここではプロンプトに埋め込むスタイル・詳細文）を自動調整する関数
     """
     score = analyze_question(question)
     
     persona_params = {}
 
     if score > 0:
-        # 感情寄りの回答を重視する設定
-        persona_params["ペルソナ1"] = {"temperature": 0.8, "style": "情熱的", "detail": "感情に寄り添う回答"}
-        persona_params["ペルソナ2"] = {"temperature": 0.8, "style": "共感的", "detail": "心情を重視した解説"}
-        persona_params["ペルソナ3"] = {"temperature": 0.75, "style": "柔軟", "detail": "状況に合わせた多面的な視点"}
+        # 感情寄りの回答を重視する設定（パラメーターはプロンプト内に記載）
+        persona_params["ペルソナ1"] = {"style": "情熱的", "detail": "感情に寄り添う回答"}
+        persona_params["ペルソナ2"] = {"style": "共感的", "detail": "心情を重視した解説"}
+        persona_params["ペルソナ3"] = {"style": "柔軟", "detail": "状況に合わせた多面的な視点"}
     else:
         # 論理寄りの回答を重視する設定
-        persona_params["ペルソナ1"] = {"temperature": 0.6, "style": "論理的", "detail": "具体的な解説を重視"}
-        persona_params["ペルソナ2"] = {"temperature": 0.65, "style": "分析的", "detail": "データや事実を踏まえた説明"}
-        persona_params["ペルソナ3"] = {"temperature": 0.7, "style": "客観的", "detail": "中立的な視点からの考察"}
+        persona_params["ペルソナ1"] = {"style": "論理的", "detail": "具体的な解説を重視"}
+        persona_params["ペルソナ2"] = {"style": "分析的", "detail": "データや事実を踏まえた説明"}
+        persona_params["ペルソナ3"] = {"style": "客観的", "detail": "中立的な視点からの考察"}
     
     return persona_params
 
-def call_gemini_api(prompt, params):
+def call_gemini_api(prompt):
     """
     Google Generative Language API の Gemini モデルを呼び出し、
-    指定のプロンプトとパラメーターに基づいた回答を取得する関数
-
-    ※payload では "contents" 内に prompt を配置し、temperature や maxOutputTokens も指定しています。
-    ※エンドポイントは models/gemini-2.0-flash-lite-preview-02-05 を利用します。
+    指定のプロンプトに基づいた回答を取得する関数
+    
+    ※今回のモデルでは、"temperature" や "maxOutputTokens" などはサポートされていないため、
+      必要最低限の "contents" キーのみを含むペイロードを送信します。
     """
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite-preview-02-05:generateContent?key={API_KEY}"
     payload = {
-        # temperature や出力トークン数は、API の仕様に合わせて設定してください
-        "temperature": params.get("temperature", 0.7),
-        "maxOutputTokens": 150,
         "contents": [{
             "parts": [{"text": prompt}]
         }]
@@ -70,7 +60,7 @@ def call_gemini_api(prompt, params):
     headers = {"Content-Type": "application/json"}
     response = requests.post(url, json=payload, headers=headers)
     if response.status_code == 200:
-        # Google の API では、生成されたコンテンツが response.json()["candidates"] に格納される場合が多いです。
+        # API のレスポンスは candidates 内に生成コンテンツが入っていると仮定
         candidates = response.json().get("candidates", [])
         if candidates:
             return candidates[0].get("content", "回答が見つかりませんでした。")
@@ -85,8 +75,14 @@ def generate_initial_answers(question, persona_params):
     """
     answers = {}
     for persona, params in persona_params.items():
-        prompt = f"【{params['style']}な視点】以下の質問に答えてください。\n質問: {question}\n詳細: {params['detail']}"
-        answer = call_gemini_api(prompt, params)
+        # パラメーターはプロンプト内に埋め込みます
+        prompt = (
+            f"【{params['style']}な視点】\n"
+            f"以下の質問に答えてください。\n"
+            f"質問: {question}\n"
+            f"詳細: {params['detail']}"
+        )
+        answer = call_gemini_api(prompt)
         answers[persona] = answer
     return answers
 
@@ -99,8 +95,7 @@ def simulate_persona_discussion(answers):
         discussion_prompt += f"{persona}の回答: {answer}\n"
     discussion_prompt += "この会話の中で、ユーザーに対して『あなたはこの状況についてどう考えますか？』といった質問を含めてください。"
     
-    # ここでは、ペルソナ1のパラメーターを利用してディスカッションを生成する例
-    discussion = call_gemini_api(discussion_prompt, {"temperature": 0.7, "style": "論理的", "detail": "ディスカッションの促進"})
+    discussion = call_gemini_api(discussion_prompt)
     return discussion
 
 def generate_followup_question(discussion):
@@ -146,8 +141,12 @@ if st.button("送信"):
         additional_input = st.text_input("上記のフォローアップ質問に対するあなたの回答を入力してください")
         if additional_input:
             st.write("### 追加回答を反映した会話の更新")
-            update_prompt = f"ユーザーからの追加回答: {additional_input}\n先ほどのディスカッション: {discussion}\nこの情報を踏まえ、今後の会話の方向性について意見を述べてください。"
-            updated_discussion = call_gemini_api(update_prompt, {"temperature": 0.7, "style": "分析的", "detail": "更新された議論のまとめ"})
+            update_prompt = (
+                f"ユーザーからの追加回答: {additional_input}\n"
+                f"先ほどのディスカッション: {discussion}\n"
+                "この情報を踏まえ、今後の会話の方向性について意見を述べてください。"
+            )
+            updated_discussion = call_gemini_api(update_prompt)
             st.markdown(updated_discussion)
     else:
         st.warning("質問を入力してください")
