@@ -3,7 +3,7 @@ import requests
 import re
 
 # Gemini API のエンドポイントと API キー（Google Cloud コンソールから発行したキー）
-API_KEY = "YOUR_GEMINI_API_KEY"
+API_KEY = "AIzaSyBTNVkzjKD3sUNVUMlp_tcXWQMO-FpfrSo"
 
 def analyze_question(question):
     """
@@ -24,7 +24,7 @@ def analyze_question(question):
 
 def adjust_parameters(question):
     """
-    質問の内容に応じてペルソナごとのパラメーター（ここではプロンプトに埋め込むスタイル・詳細文）を自動調整する関数
+    質問の内容に応じてペルソナごとのパラメーター（プロンプト内に埋め込むスタイル・詳細文）を自動調整する関数
     """
     score = analyze_question(question)
     
@@ -109,7 +109,7 @@ def generate_followup_question(discussion):
     return followup
 
 # --- Streamlit UI ---
-st.title("自動パラメーター調整付きペルソナ会話システム（Gemini API 使用）")
+st.title("ぼくのともだち")
 
 # ユーザーからの初回質問入力
 question = st.text_area("最初の質問を入力してください", placeholder="ここに質問を入力", height=150)
