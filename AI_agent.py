@@ -7,13 +7,12 @@ API_KEY = "AIzaSyBTNVkzjKD3sUNVUMlp_tcXWQMO-FpfrSo"
 
 def analyze_question(question):
     """
-    質問内容を解析し、感情やキーワードに応じたスコアを返す関数。
+    質問内容を解析し、感情やキーワードに応じたスコアを返す。
     キーワード '困った' や '悩み' などが含まれていればスコアを高めにする。
     """
     score = 0
     keywords_emotional = ["困った", "悩み", "苦しい", "辛い"]
     keywords_logical = ["理由", "原因", "仕組み", "方法"]
-    
     for word in keywords_emotional:
         if re.search(word, question):
             score += 1
@@ -24,17 +23,15 @@ def analyze_question(question):
 
 def adjust_parameters(question):
     """
-    質問の内容に応じて、各ペルソナのプロンプトに埋め込むスタイル・詳細文を自動調整する関数。
+    質問内容に応じて、各ペルソナのプロンプトに埋め込むスタイルと詳細文を自動調整する。
     """
     score = analyze_question(question)
     persona_params = {}
     if score > 0:
-        # 感情寄りの回答を重視
         persona_params["ペルソナ1"] = {"style": "情熱的", "detail": "感情に寄り添う回答"}
         persona_params["ペルソナ2"] = {"style": "共感的", "detail": "心情を重視した解説"}
         persona_params["ペルソナ3"] = {"style": "柔軟", "detail": "状況に合わせた多面的な視点"}
     else:
-        # 論理寄りの回答を重視
         persona_params["ペルソナ1"] = {"style": "論理的", "detail": "具体的な解説を重視"}
         persona_params["ペルソナ2"] = {"style": "分析的", "detail": "データや事実を踏まえた説明"}
         persona_params["ペルソナ3"] = {"style": "客観的", "detail": "中立的な視点からの考察"}
@@ -42,10 +39,8 @@ def adjust_parameters(question):
 
 def call_gemini_api(prompt):
     """
-    Google Generative Language API の Gemini モデル（gemini-1.5-flash）を呼び出し、
-    指定されたプロンプトに基づいた回答を取得する関数。
-    
-    ※今回のモデルでは、必要最低限の "contents" キーのみを含むペイロードを送信する。
+    Gemini-1.5-flash モデルを呼び出し、指定されたプロンプトに基づく回答を取得する。
+    ※必要最低限の "contents" キーのみを含むペイロードを送信する。
     """
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={API_KEY}"
     payload = {
@@ -64,9 +59,17 @@ def call_gemini_api(prompt):
     else:
         return f"エラー: {response.status_code} {response.text}"
 
+def truncate_text(text, limit=50):
+    """
+    テキストを前後の空白を除去し、指定文字数（デフォルト50文字）に収まるように切り詰める。
+    """
+    t = text.strip().replace("\n", " ")
+    return t if len(t) <= limit else t[:limit] + "…"
+
 def generate_initial_answers(question, persona_params):
     """
-    ユーザーの初回質問に対して、各ペルソナの回答を生成する関数。
+    ユーザーの初回質問に対し、各ペルソナの回答を生成する。
+    回答は余計な推論を含まず、50文字程度に短くまとめる。
     """
     answers = {}
     for persona, params in persona_params.items():
@@ -74,43 +77,55 @@ def generate_initial_answers(question, persona_params):
             f"【{params['style']}な視点】\n"
             f"以下の質問に答えてください。\n"
             f"質問: {question}\n"
-            f"詳細: {params['detail']}"
+            f"詳細: {params['detail']}\n"
+            "回答は50文字程度で、余計な推論を含めないように。"
         )
         answer = call_gemini_api(prompt)
-        answers[persona] = answer
+        answers[persona] = truncate_text(answer, 50)
     return answers
 
 def simulate_persona_discussion(answers):
     """
-    各ペルソナの初回回答をもとに、実際の人間の会話のように、  
-    ゆっくり丁寧に議論している様子をシミュレーションする関数。
+    各ペルソナの初回回答をもとに、実際の人間の会話のように、
+    ゆっくり丁寧に短い一文ずつの対話形式（UDスタイル）で議論する会話を生成する。
     
-    ※以下のプロンプトでは、出力を「ペルソナ1: 発言内容」「ペルソナ2: 発言内容」と短い一文で表記する形式で求める。
+    出力形式は各行「ペルソナX: 発言内容」とし、各発言は短い一文。
     """
-    discussion_prompt = (
-        "次の各ペルソナの初回回答をもとに、友達同士がゆっくりと話している会話を作ってください。\n"
-    )
+    discussion_prompt = "次の各ペルソナの初回回答をもとに、友達同士がゆっくりと話している自然な会話を作ってください。\n"
     for persona, answer in answers.items():
         discussion_prompt += f"{persona}の初回回答: {answer}\n"
     discussion_prompt += (
         "\n出力形式：\n"
-        "ペルソナ1: 短い一文\n"
-        "ペルソナ2: 短い一文\n"
-        "ペルソナ3: 短い一文\n"
-        "※各行は一つの発言で、余分な情報を含まず、シンプルな対話形式にしてください。"
+        "ペルソナ1: 発言内容（50文字程度）\n"
+        "ペルソナ2: 発言内容（50文字程度）\n"
+        "ペルソナ3: 発言内容（50文字程度）\n"
+        "各行は一つの発言で、余計な記述はなくシンプルにしてください。"
     )
     discussion = call_gemini_api(discussion_prompt)
     return discussion
 
 def generate_followup_question(discussion):
     """
-    ペルソナ間のディスカッションから、ユーザーへのフォローアップ質問を抽出または生成する関数。
+    ペルソナ間のディスカッションからユーザーへのフォローアップ質問を抽出または生成する。
     """
     if "？" in discussion:
         followup = discussion.split("？")[0] + "？"
     else:
         followup = "この件について、さらに詳しく教えていただけますか？"
     return followup
+
+def display_discussion_in_boxes(discussion):
+    """
+    生成された会話の各発言を改行で分割し、各発言を枠で囲んで表示する。
+    """
+    lines = discussion.split("\n")
+    for line in lines:
+        line = line.strip()
+        if line:
+            st.markdown(
+                f"""<div style="border:1px solid #ddd; border-radius:5px; padding:8px; margin-bottom:8px;">{line}</div>""",
+                unsafe_allow_html=True
+            )
 
 # --- Streamlit UI ---
 st.title("ぼくのともだち")
@@ -123,22 +138,22 @@ if st.button("送信"):
         # 内部処理としてパラメーター自動調整
         persona_params = adjust_parameters(question)
         
-        # 各ペルソナの初回回答生成
+        # 各ペルソナの初回回答生成（50文字程度に短縮）
         st.write("### 各ペルソナからの初回回答")
         initial_answers = generate_initial_answers(question, persona_params)
         for persona, answer in initial_answers.items():
             st.markdown(f"**{persona}**: {answer}")
-
+        
         # ペルソナ間の会話シミュレーション（UDスタイルの対話形式）
         st.write("### ペルソナ間のディスカッション")
         discussion = simulate_persona_discussion(initial_answers)
-        st.markdown(discussion)
-
+        display_discussion_in_boxes(discussion)
+        
         # フォローアップ質問生成
         st.write("### フォローアップ質問")
         followup_question = generate_followup_question(discussion)
         st.markdown(f"**システムからの質問:** {followup_question}")
-
+        
         # ユーザーによるフォローアップ回答の入力
         additional_input = st.text_input("上記のフォローアップ質問に対するあなたの回答を入力してください")
         if additional_input:
@@ -149,6 +164,6 @@ if st.button("送信"):
                 "この情報を踏まえ、今後の会話の方向性について意見を述べてください。"
             )
             updated_discussion = call_gemini_api(update_prompt)
-            st.markdown(updated_discussion)
+            display_discussion_in_boxes(updated_discussion)
     else:
         st.warning("質問を入力してください")
