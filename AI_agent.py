@@ -2,15 +2,12 @@ import streamlit as st
 import requests
 import re
 
-# =============== 設定エリア ===============
 API_KEY = "AIzaSyDfyltY3n2p8Ia4qrWJKk8gU8ZBTxsGKWI"  # gemini-1.5-flash 用の有効な API キーを指定
-
-
-# =============== 関数定義 ===============
 
 def analyze_question(question: str) -> int:
     """
-    質問内容に含まれるキーワードから、感情寄り・論理寄りをざっくり判定するためのスコアを算出する。
+    質問内容に含まれるキーワードから、
+    感情寄り or 論理寄りをざっくり判定するためのスコアを算出。
     """
     score = 0
     keywords_emotional = ["困った", "悩み", "苦しい", "辛い"]
@@ -26,7 +23,7 @@ def analyze_question(question: str) -> int:
 
 def adjust_parameters(question: str) -> dict:
     """
-    質問の内容に応じて、各ペルソナの「style」と「detail」を自動設定する。
+    質問内容に応じて、各ペルソナの「style」と「detail」を自動設定する。
     """
     score = analyze_question(question)
     persona_params = {}
@@ -46,8 +43,8 @@ def adjust_parameters(question: str) -> dict:
 def call_gemini_api(prompt: str) -> str:
     """
     gemini-1.5-flash モデルを呼び出し、指定されたプロンプトに基づく回答を取得する。
-    通信・解析エラー時も必ず文字列を返す（None にはならない）。
-    ※ デバッグログを追加してレスポンスを確認できるようにする。
+    通信・解析エラー時も必ず文字列を返す（None にはしない）。
+    ※ デバッグログを追加し、レスポンスをコンソールに出力。
     """
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={API_KEY}"
     payload = {
@@ -57,18 +54,17 @@ def call_gemini_api(prompt: str) -> str:
     }
     headers = {"Content-Type": "application/json"}
 
-    # ----- ネットワーク送信 -----
+    # ネットワーク送信
     try:
         response = requests.post(url, json=payload, headers=headers)
     except Exception as e:
-        # 通信自体が失敗した場合
         print("[DEBUG] Network error:", str(e))
         return f"エラー: リクエスト送信時に例外が発生しました -> {str(e)}"
 
     print("[DEBUG] Status code:", response.status_code)
     print("[DEBUG] Response text:", response.text)
 
-    # ----- レスポンス解析 -----
+    # レスポンス解析
     try:
         if response.status_code == 200:
             rjson = response.json()
@@ -82,7 +78,6 @@ def call_gemini_api(prompt: str) -> str:
         else:
             return f"エラー: ステータスコード {response.status_code} -> {response.text}"
     except Exception as e:
-        # JSON 解析エラーなど
         print("[DEBUG] JSON decode error:", str(e))
         return f"エラー: レスポンス解析に失敗しました -> {str(e)}"
 
@@ -115,24 +110,32 @@ def generate_initial_answers(question: str, persona_params: dict) -> dict:
         print(f"[DEBUG] {persona} short_answer:", short_answer)
     return answers
 
-def simulate_persona_discussion(answers: dict) -> str:
+def simulate_persona_discussion(answers: dict, user_question: str) -> str:
     """
-    各ペルソナの回答をもとに、友達同士が話している自然な会話を生成する。
-    出力は 「ペルソナX: ○○」 のように短い一文ごとで。
+    各ペルソナの初回回答とユーザーの質問を踏まえ、
+    3人が「雑談になりすぎずにユーザーの悩みにフォーカス」する会話を生成する。
     """
-    discussion_prompt = "次の各ペルソナの初回回答をもとに、友達同士がゆっくりと話している自然な会話を作ってください。\n"
+    # ディスカッション用プロンプト
+    discussion_prompt = (
+        "ユーザーの質問がこちらです:\n"
+        f"【質問】{user_question}\n\n"
+        "次に、各ペルソナの初回回答を示します:\n"
+    )
     for persona, ans in answers.items():
         discussion_prompt += f"{persona}の初回回答: {ans}\n"
 
-    # 出力フォーマットを指示
     discussion_prompt += (
-        "\n出力形式：\n"
-        "ペルソナ1: 発言内容（50文字程度）\n"
-        "ペルソナ2: 発言内容（50文字程度）\n"
-        "ペルソナ3: 発言内容（50文字程度）\n"
-        "各行は一つの発言で、余計な記述はなくシンプルにしてください。"
+        "\n上記の質問と初回回答をもとに、3人が雑談ではなく、"
+        "ユーザーの疑問や悩みにしっかり焦点を当てて話し合ってください。"
+        "必要に応じて追加の質問やアイデアも出してください。\n\n"
+        "【出力形式】\n"
+        "ペルソナ1: 一言 (50文字程度)\n"
+        "ペルソナ2: 一言 (50文字程度)\n"
+        "ペルソナ3: 一言 (50文字程度)\n"
+        "※各行は一度の発言で、余計な記述やJSON形式は不要。\n"
     )
 
+    print("[DEBUG] discussion_prompt:", discussion_prompt)
     discussion = call_gemini_api(discussion_prompt)
     print("[DEBUG] discussion result:", discussion)
     return discussion
@@ -140,7 +143,7 @@ def simulate_persona_discussion(answers: dict) -> str:
 def generate_followup_question(discussion: str) -> str:
     """
     ペルソナ間のディスカッションからユーザーへのフォローアップ質問を抽出。
-    ディスカッション内の最初の「？」までを取り出して「？」を付与。
+    ディスカッション内に「？」があれば最初の分を提示。それ以外は定型文に。
     """
     if "？" in discussion:
         return discussion.split("？")[0] + "？"
@@ -166,10 +169,9 @@ def display_discussion_in_boxes(discussion: str):
             )
 
 
-# =============== Streamlit アプリ ===============
+# =============== Streamlit アプリケーション ===============
 st.title("ぼくのともだち")
 
-# ユーザー入力（最初の質問）
 question = st.text_area(
     "最初の質問を入力してください", 
     placeholder="ここに質問を入力", 
@@ -178,27 +180,27 @@ question = st.text_area(
 
 if st.button("送信"):
     if question.strip():
-        # 1. ペルソナパラメーター自動調整
+        # 1. ペルソナのパラメータ調整
         persona_params = adjust_parameters(question)
         print("[DEBUG] persona_params:", persona_params)
 
-        # 2. 各ペルソナの初回回答を生成（50文字程度）
+        # 2. 各ペルソナの初回回答生成
         st.write("### 各ペルソナからの初回回答")
         initial_answers = generate_initial_answers(question, persona_params)
-        for persona, answer in initial_answers.items():
-            st.markdown(f"**{persona}**: {answer}")
+        for persona, ans in initial_answers.items():
+            st.markdown(f"**{persona}**: {ans}")
 
-        # 3. ペルソナ間のディスカッション生成
+        # 3. ペルソナ間のディスカッション（ユーザーの質問を再度提示）
         st.write("### ペルソナ間のディスカッション")
-        discussion = simulate_persona_discussion(initial_answers)
+        discussion = simulate_persona_discussion(initial_answers, question)
         display_discussion_in_boxes(discussion)
 
-        # 4. フォローアップ質問
+        # 4. フォローアップ質問生成
         st.write("### フォローアップ質問")
         followup_question = generate_followup_question(discussion)
         st.markdown(f"**システムからの質問:** {followup_question}")
 
-        # 5. ユーザーによる追加回答
+        # 5. ユーザーの追加回答
         additional_input = st.text_input("上記のフォローアップ質問に対するあなたの回答を入力してください")
         if additional_input.strip():
             st.write("### 追加回答を反映した会話の更新")
@@ -209,5 +211,6 @@ if st.button("送信"):
             )
             updated_discussion = call_gemini_api(update_prompt)
             display_discussion_in_boxes(updated_discussion)
+
     else:
         st.warning("質問を入力してください")
