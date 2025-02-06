@@ -3,57 +3,38 @@ import requests
 import re
 
 # ========================
-#    定数／設定
+#   設定エリア
 # ========================
 API_KEY = "AIzaSyCyHFSCTYR9T0a5zPn9yg-49eevJXqKP9g"  # gemini-1.5-flash 用 API キー
 
+# モデル名
+MODEL_NAME = "gemini-1.5-flash"
+
+# 3人の日本人名
+NAMES = ["ゆかり", "しんや", "みのる"]
+
 # ========================
-#    関数定義
+#   関数定義
 # ========================
 
-def analyze_question(question: str) -> int:
+def remove_json_artifacts(text: str) -> str:
     """
-    質問内容を解析し、感情やキーワードに応じたスコアを返す。
-    キーワード '困った' や '悩み' などが含まれていればスコアを高めにする。
+    モデルが JSON 形式や 'parts': [{'text': ...}], 'role': 'model' などの情報を返した場合、
+    正規表現で取り除く簡易処理。
     """
-    score = 0
-    keywords_emotional = ["困った", "悩み", "苦しい", "辛い"]
-    keywords_logical = ["理由", "原因", "仕組み", "方法"]
-    
-    for word in keywords_emotional:
-        if re.search(word, question):
-            score += 1
-    for word in keywords_logical:
-        if re.search(word, question):
-            score -= 1
-    return score
-
-def adjust_parameters(question: str) -> dict:
-    """
-    質問内容に応じて、各ペルソナのプロンプトに埋め込むスタイルと詳細文を自動調整する。
-    """
-    score = analyze_question(question)
-    persona_params = {}
-
-    if score > 0:
-        # 感情寄りの回答を重視
-        persona_params["ペルソナ1"] = {"style": "情熱的", "detail": "感情に寄り添う回答"}
-        persona_params["ペルソナ2"] = {"style": "共感的", "detail": "心情を重視した解説"}
-        persona_params["ペルソナ3"] = {"style": "柔軟", "detail": "状況に合わせた多面的な視点"}
-    else:
-        # 論理寄りの回答を重視
-        persona_params["ペルソナ1"] = {"style": "論理的", "detail": "具体的な解説を重視"}
-        persona_params["ペルソナ2"] = {"style": "分析的", "detail": "データや事実を踏まえた説明"}
-        persona_params["ペルソナ3"] = {"style": "客観的", "detail": "中立的な視点からの考察"}
-
-    return persona_params
+    if not isinstance(text, str):
+        text = str(text) if text else ""
+    # 'parts': [{'text': ... }] などを除去
+    pattern = r"'parts': \[\{'text':.*?\}\], 'role': 'model'"
+    cleaned = re.sub(pattern, "", text, flags=re.DOTALL)
+    return cleaned.strip()
 
 def call_gemini_api(prompt: str) -> str:
     """
-    gemini-1.5-flash モデルを呼び出し、指定されたプロンプトに基づく回答を取得する。
-    エラー発生時も必ず文字列を返す（None にはならない）。
+    gemini-1.5-flash モデルを呼び出し、指定されたプロンプトに対する回答を取得する。
+    content が dict の場合は 'value' キーなどを取り出す。
     """
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={API_KEY}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent?key={API_KEY}"
     payload = {
         "contents": [{
             "parts": [{"text": prompt}]
@@ -61,128 +42,179 @@ def call_gemini_api(prompt: str) -> str:
     }
     headers = {"Content-Type": "application/json"}
 
-    # ネットワーク送信
     try:
         response = requests.post(url, json=payload, headers=headers)
     except Exception as e:
-        return f"エラー: リクエスト送信時に例外が発生しました -> {str(e)}"
+        return f"エラー: リクエスト送信失敗 -> {str(e)}"
 
-    # レスポンス解析
+    if response.status_code != 200:
+        return f"エラー: {response.status_code} -> {response.text}"
+
     try:
-        if response.status_code == 200:
-            rjson = response.json()
-            candidates = rjson.get("candidates", [])
-            if candidates:
-                # "content" がない場合はフォールバック
-                return candidates[0].get("content", "回答が見つかりませんでした。")
-            else:
-                return "回答が見つかりませんでした。"
+        rjson = response.json()
+        candidates = rjson.get("candidates", [])
+        if not candidates:
+            return "回答が見つかりません。(candidatesが空)"
+
+        # 最初の候補を取得
+        candidate0 = candidates[0]
+        content_val = candidate0.get("content", "")
+        # 'content' が辞書の場合への対処
+        if isinstance(content_val, dict):
+            # もし 'value' 等があれば取得
+            content_str = content_val.get("value", "")
         else:
-            return f"エラー: ステータスコード {response.status_code} -> {response.text}"
+            content_str = str(content_val)
+
+        content_str = content_str.strip()
+        if not content_str:
+            return "回答が見つかりません。(contentが空)"
+
+        # 不要な JSON 表記を除去
+        return remove_json_artifacts(content_str)
+
     except Exception as e:
-        return f"エラー: レスポンス解析に失敗しました -> {str(e)}"
+        return f"エラー: JSON解析失敗 -> {str(e)}"
 
-def generate_initial_answers(question: str, persona_params: dict) -> dict:
+def generate_answer(name: str, question: str) -> str:
     """
-    ユーザーの初回質問に対して、各ペルソナの回答を生成する。
-    文字数制限はなくし、長い回答も許容する。
+    個別に、指定した名前が質問に回答する形で呼び出す。
     """
-    answers = {}
-    for persona, params in persona_params.items():
-        prompt = (
-            f"【{params['style']}な視点】\n"
-            f"以下の質問に答えてください。\n"
-            f"質問: {question}\n"
-            f"詳細: {params['detail']}\n"
-            "回答に文字数制限はありません。余計な推論は控えめで、質問に集中してください。"
-        )
-        raw_answer = call_gemini_api(prompt)
-        answers[persona] = raw_answer  # そのまま全体を格納
-    return answers
-
-def simulate_persona_discussion(answers: dict) -> str:
-    """
-    各ペルソナの初回回答をもとに、友達同士がゆっくりと話している自然な会話を生成する。
-    文字数制限を撤廃し、自由に会話させる。
-    """
-    discussion_prompt = (
-        "以下の各ペルソナの初回回答を踏まえて、自然な会話を作ってください。\n"
+    prompt = (
+        f"{name}が以下の質問について回答してください。\n"
+        f"質問: {question}\n"
+        "文字数制限はありません。余計な JSON は不要です。"
     )
-    for persona, ans in answers.items():
-        discussion_prompt += f"{persona}の初回回答: {ans}\n"
-    discussion_prompt += (
-        "\n出力形式：\n"
-        "ペルソナ1: 発言内容（自由）\n"
-        "ペルソナ2: 発言内容（自由）\n"
-        "ペルソナ3: 発言内容（自由）\n"
-        "※各行は一度の発言で、JSONや余計な記述は不要とします。"
+    return call_gemini_api(prompt)
+
+def generate_discussion(names_answers: dict) -> str:
+    """
+    3人の初回回答をもとに、自然な会話を生成する。
+    """
+    prompt = "以下は3人の初回回答です。\n"
+    for nm, ans in names_answers.items():
+        prompt += f"{nm}: {ans}\n"
+
+    prompt += (
+        "\nこの3人が友達同士のように、ユーザーの話題について話し合ってください。"
+        "「名前: 発言」の形式で、LINE風の短いやりとりを日本語で出力してください。\n"
+        "余計な JSON は入れず、自然な文章のみをお願いします。"
     )
-    return call_gemini_api(discussion_prompt)
+    return call_gemini_api(prompt)
 
-def generate_followup_question(discussion: str) -> str:
+def display_line_style(discussion: str):
     """
-    ペルソナ間のディスカッションから、ユーザーへのフォローアップ質問を抽出または生成する。
-    """
-    if "？" in discussion:
-        return discussion.split("？")[0] + "？"
-    else:
-        return "この件について、さらに詳しく教えていただけますか？"
-
-def display_discussion_in_boxes(discussion: str):
-    """
-    生成された会話の各発言を改行で分割し、各発言を枠で囲んで表示する。
+    discussion を改行で分割し、「名前: 内容」をパースして LINE風吹き出しを表示する。
     """
     lines = discussion.split("\n")
+
+    # 吹き出しカラーを名前ごとに分ける（好みで変更可）
+    color_map = {
+        "ゆかり": "#DCF8C6",  # 薄い緑
+        "しんや": "#E0F7FA",  # 薄い水色
+        "みのる": "#FCE4EC",  # 薄いピンク
+    }
+
     for line in lines:
         line = line.strip()
-        if line:
-            st.markdown(
-                f"""<div style="border:1px solid #ddd; border-radius:5px; padding:8px; margin-bottom:8px;">
-                {line}
-                </div>""",
-                unsafe_allow_html=True
-            )
+        if not line:
+            continue
+
+        # 「名前: 内容」の形式をパース
+        # 例： "ゆかり: なるほど、いいね。"
+        matched = re.match(r"^(.*?)\s*:\s*(.*)$", line)
+        if matched:
+            name = matched.group(1)
+            message = matched.group(2)
+        else:
+            # もし上記形式でないなら、そのまま表示
+            name = ""
+            message = line
+
+        # 吹き出しの背景色を名前別に設定 (無かったらグレーに)
+        bg_color = color_map.get(name, "#F5F5F5")
+
+        # HTML で吹き出し風の見た目に
+        bubble_html = f"""
+        <div style="
+            background-color: {bg_color}; 
+            display: inline-block; 
+            border-radius: 10px; 
+            padding: 8px; 
+            margin: 5px 0;
+        ">
+            <strong style="color: #000;">{name}</strong><br>
+            {message}
+        </div>
+        """
+        st.markdown(bubble_html, unsafe_allow_html=True)
 
 # ========================
-#    Streamlit アプリ
+#   Streamlit アプリ
 # ========================
-st.title("ぼくのともだち (50文字制限解除版)")
+st.title("ぼくのともだち - 日本人名＆LINE風表示")
 
-# ユーザーからの初回質問入力
-question = st.text_area("最初の質問を入力してください", placeholder="ここに質問を入力", height=150)
+if "names" not in st.session_state:
+    # 3名を固定 (ユーザーが変更したい場合はここを動的にしてもOK)
+    st.session_state["names"] = NAMES
 
-if st.button("送信"):
-    if question:
-        # 自動パラメーター調整
-        persona_params = adjust_parameters(question)
+if "initial_answers" not in st.session_state:
+    st.session_state["initial_answers"] = {}
 
-        # 各ペルソナの初回回答生成（制限なし）
-        st.write("### 各ペルソナからの初回回答")
-        initial_answers = generate_initial_answers(question, persona_params)
-        for persona, answer in initial_answers.items():
-            st.markdown(f"**{persona}**: {answer}")
+if "discussion" not in st.session_state:
+    st.session_state["discussion"] = ""
 
-        # ペルソナ間のディスカッション（文字数制限なし）
-        st.write("### ペルソナ間のディスカッション")
-        discussion = simulate_persona_discussion(initial_answers)
-        display_discussion_in_boxes(discussion)
+# 1. 質問を入力
+question = st.text_area("最初の質問を入力してください", placeholder="例: 官民共創施設の名前を考えてください。")
 
-        # フォローアップ質問生成
-        st.write("### フォローアップ質問")
-        followup_question = generate_followup_question(discussion)
-        st.markdown(f"**システムからの質問:** {followup_question}")
-
-        # ユーザーの追加回答を入力
-        additional_input = st.text_input("上記のフォローアップ質問に対するあなたの回答を入力してください")
-        if additional_input:
-            st.write("### 追加回答を反映した会話の更新")
-            update_prompt = (
-                f"ユーザーからの追加回答: {additional_input}\n"
-                f"先ほどのディスカッション: {discussion}\n"
-                "この情報を踏まえ、今後の会話の方向性について意見を述べてください。\n"
-                "制限はなく自由に回答してください。"
-            )
-            updated_discussion = call_gemini_api(update_prompt)
-            display_discussion_in_boxes(updated_discussion)
+# 2. 初回回答取得ボタン
+if st.button("初回回答を取得"):
+    if not question.strip():
+        st.warning("質問を入力してください。")
     else:
-        st.warning("質問を入力してください")
+        # 3人それぞれの回答を取得
+        answers_dict = {}
+        for nm in st.session_state["names"]:
+            ans = generate_answer(nm, question)
+            answers_dict[nm] = ans
+        
+        st.session_state["initial_answers"] = answers_dict
+        st.session_state["discussion"] = ""  # 会話履歴初期化
+
+        st.write("### 初回回答")
+        for nm, ans in answers_dict.items():
+            # LINE風で表示
+            st.markdown(f"**{nm}**: {ans}")
+
+# 3. 会話を進めるボタン
+if st.button("会話を進める"):
+    if not st.session_state["initial_answers"]:
+        st.warning("先に『初回回答を取得』を押してください。")
+    else:
+        # これまでの会話 + 新たなディスカッション
+        new_discussion = generate_discussion(st.session_state["initial_answers"])
+        # 連結して履歴に追加
+        st.session_state["discussion"] += "\n" + new_discussion
+
+        st.write("### 3人の会話 (LINE風)")
+        display_line_style(st.session_state["discussion"])
+
+# 4. ユーザー追加入力
+user_follow = st.text_input("彼らの会話に追加で伝えたいこと")
+
+if st.button("追加回答を踏まえて会話を継続"):
+    if not st.session_state["discussion"]:
+        st.warning("まずは『会話を進める』を押して、会話を開始してください。")
+    else:
+        # 追加発言を踏まえて再度モデルへ
+        prompt_cont = (
+            f"これまでの会話:\n{st.session_state['discussion']}\n\n"
+            f"ユーザーからの追加発言: {user_follow}\n"
+            "この情報を踏まえ、3人がさらに会話を続けます。\n"
+            "名前: 内容 の形式で、LINEのように自然なやりとりをお願いします。"
+        )
+        cont_result = call_gemini_api(prompt_cont)
+        st.session_state["discussion"] += "\n" + cont_result
+
+        st.write("### 更新された会話")
+        display_line_style(st.session_state["discussion"])
