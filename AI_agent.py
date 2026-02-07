@@ -1,169 +1,176 @@
 import streamlit as st
-import requests
-import re
-import random
+import streamlit.components.v1 as components
 
-# ========================
-#    定数／設定
-# ========================
-API_KEY = "AIzaSyCyHFSCTYR9T0a5zPn9yg-49eevJXqKP9g"  # gemini-1.5-flash 用 API キー
-MODEL_NAME = "gemini-1.5-flash"
-NAMES = ["ゆかり", "しんや", "みのる"]
+st.set_page_config(page_title="Mini Platformer", page_icon="🍄", layout="centered")
 
-# ========================
-#    関数定義
-# ========================
+st.title("🍄 ちいさなマリオ風プラットフォーマー")
+st.write(
+    "矢印キーで左右に移動、スペースキーでジャンプ。ゴールの旗に触れるとクリアです。"
+)
 
-def analyze_question(question: str) -> int:
-    score = 0
-    keywords_emotional = ["困った", "悩み", "苦しい", "辛い"]
-    keywords_logical = ["理由", "原因", "仕組み", "方法"]
-    for word in keywords_emotional:
-        if re.search(word, question):
-            score += 1
-    for word in keywords_logical:
-        if re.search(word, question):
-            score -= 1
-    return score
+GAME_HTML = """
+<!DOCTYPE html>
+<html lang=\"ja\">
+<head>
+  <meta charset=\"UTF-8\" />
+  <style>
+    body { margin: 0; background: #9bd3ff; font-family: sans-serif; }
+    #game { background: linear-gradient(#9bd3ff 0%, #dff6ff 60%, #9ad07f 60%); display: block; margin: 0 auto; border: 4px solid #2b2b2b; }
+    #hud { text-align: center; padding: 8px; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <div id=\"hud\">←/→ で移動、Spaceでジャンプ</div>
+  <canvas id=\"game\" width=\"800\" height=\"400\"></canvas>
 
-def adjust_parameters(question: str) -> dict:
-    score = analyze_question(question)
-    params = {}
-    if score > 0:
-        params["ゆかり"] = {"style": "情熱的", "detail": "感情に寄り添う回答"}
-        params["しんや"] = {"style": "共感的", "detail": "心情を重視した解説"}
-        params["みのる"] = {"style": "柔軟", "detail": "状況に合わせた多面的な視点"}
-    else:
-        params["ゆかり"] = {"style": "論理的", "detail": "具体的な解説を重視"}
-        params["しんや"] = {"style": "分析的", "detail": "データや事実を踏まえた説明"}
-        params["みのる"] = {"style": "客観的", "detail": "中立的な視点からの考察"}
-    return params
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
 
-def remove_json_artifacts(text: str) -> str:
-    if not isinstance(text, str):
-        text = str(text) if text else ""
-    pattern = r"'parts': \[\{'text':.*?\}\], 'role': 'model'"
-    cleaned = re.sub(pattern, "", text, flags=re.DOTALL)
-    return cleaned.strip()
+    const gravity = 0.6;
+    const friction = 0.8;
+    const player = {
+      x: 50,
+      y: 280,
+      w: 32,
+      h: 40,
+      vx: 0,
+      vy: 0,
+      speed: 0.6,
+      jump: -12,
+      grounded: false
+    };
 
-def call_gemini_api(prompt: str) -> str:
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent?key={API_KEY}"
-    payload = {
-        "contents": [{
-            "parts": [{"text": prompt}]
-        }]
+    const platforms = [
+      { x: 0, y: 320, w: 800, h: 80 },
+      { x: 120, y: 250, w: 120, h: 20 },
+      { x: 320, y: 210, w: 140, h: 20 },
+      { x: 520, y: 170, w: 120, h: 20 },
+      { x: 680, y: 260, w: 80, h: 20 }
+    ];
+
+    const flag = { x: 740, y: 110, w: 20, h: 90 };
+
+    const keys = { left: false, right: false, jump: false };
+    let cleared = false;
+
+    function handleKeyDown(e) {
+      if (e.code === 'ArrowLeft') keys.left = true;
+      if (e.code === 'ArrowRight') keys.right = true;
+      if (e.code === 'Space') keys.jump = true;
     }
-    headers = {"Content-Type": "application/json"}
-    try:
-        response = requests.post(url, json=payload, headers=headers)
-    except Exception as e:
-        return f"エラー: リクエスト送信時に例外が発生しました -> {str(e)}"
-    if response.status_code != 200:
-        return f"エラー: ステータスコード {response.status_code} -> {response.text}"
-    try:
-        rjson = response.json()
-        candidates = rjson.get("candidates", [])
-        if not candidates:
-            return "回答が見つかりませんでした。(candidatesが空)"
-        candidate0 = candidates[0]
-        content_val = candidate0.get("content", "")
-        if isinstance(content_val, dict):
-            # parts 内の text を連結する
-            parts = content_val.get("parts", [])
-            content_str = " ".join([p.get("text", "") for p in parts])
-        else:
-            content_str = str(content_val)
-        content_str = content_str.strip()
-        if not content_str:
-            return "回答が見つかりませんでした。(contentが空)"
-        return remove_json_artifacts(content_str)
-    except Exception as e:
-        return f"エラー: レスポンス解析に失敗しました -> {str(e)}"
 
-def generate_discussion(question: str, persona_params: dict) -> str:
-    prompt = f"【ユーザーの質問】\n{question}\n\n"
-    for name, params in persona_params.items():
-        prompt += f"{name}は【{params['style']}な視点】で、{params['detail']}。\n"
-    prompt += (
-        "\n上記情報を元に、3人が友達同士の自然な会話をしてください。\n"
-        "出力形式は以下の通りです。\n"
-        "ゆかり: 発言内容\n"
-        "しんや: 発言内容\n"
-        "みのる: 発言内容\n"
-        "余計なJSON形式は入れず、自然な日本語の会話のみを出力してください。"
-    )
-    return call_gemini_api(prompt)
-
-def generate_summary(discussion: str) -> str:
-    prompt = (
-        "以下は3人の会話内容です。\n"
-        f"{discussion}\n\n"
-        "この会話を踏まえて、質問に対するまとめ回答を生成してください。\n"
-        "自然な日本語文で出力し、余計なJSON形式は不要です。"
-    )
-    return call_gemini_api(prompt)
-
-def display_line_style(text: str):
-    lines = text.split("\n")
-    color_map = {
-        "ゆかり": "#DCF8C6",
-        "しんや": "#E0F7FA",
-        "みのる": "#FCE4EC"
+    function handleKeyUp(e) {
+      if (e.code === 'ArrowLeft') keys.left = false;
+      if (e.code === 'ArrowRight') keys.right = false;
+      if (e.code === 'Space') keys.jump = false;
     }
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        matched = re.match(r"^(.*?):\s*(.*)$", line)
-        if matched:
-            name = matched.group(1)
-            message = matched.group(2)
-        else:
-            name = ""
-            message = line
-        bg_color = color_map.get(name, "#F5F5F5")
-        bubble_html = f"""
-        <div style="
-            background-color: {bg_color};
-            border:1px solid #ddd;
-            border-radius:10px;
-            padding:8px;
-            margin:5px 0;
-            width: fit-content;
-        ">
-            <strong>{name}</strong><br>
-            {message}
-        </div>
-        """
-        st.markdown(bubble_html, unsafe_allow_html=True)
 
-# ========================
-#    Streamlit アプリ
-# ========================
-st.title("ぼくのともだち")
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
 
-question = st.text_area("質問を入力してください", placeholder="例: 官民共創施設の名前を考えてください。", height=150)
+    function update() {
+      if (keys.left) player.vx -= player.speed;
+      if (keys.right) player.vx += player.speed;
 
-if "discussion" not in st.session_state:
-    st.session_state["discussion"] = ""
-if "summary" not in st.session_state:
-    st.session_state["summary"] = ""
+      if (keys.jump && player.grounded) {
+        player.vy = player.jump;
+        player.grounded = false;
+      }
 
-if st.button("会話を開始"):
-    if question.strip():
-        persona_params = adjust_parameters(question)
-        discussion = generate_discussion(question, persona_params)
-        st.session_state["discussion"] = discussion
-        st.write("### 3人の会話")
-        display_line_style(discussion)
-    else:
-        st.warning("質問を入力してください。")
+      player.vx *= friction;
+      player.vy += gravity;
+      player.x += player.vx;
+      player.y += player.vy;
 
-if st.button("会話をまとめる"):
-    if st.session_state["discussion"]:
-        summary = generate_summary(st.session_state["discussion"])
-        st.session_state["summary"] = summary
-        st.write("### まとめ回答")
-        st.markdown(f"**まとめ:** {summary}")
-    else:
-        st.warning("まずは会話を開始してください。")
+      if (player.x < 0) player.x = 0;
+      if (player.x + player.w > canvas.width) player.x = canvas.width - player.w;
+
+      player.grounded = false;
+      platforms.forEach((p) => {
+        const collideX = player.x < p.x + p.w && player.x + player.w > p.x;
+        const collideY = player.y < p.y + p.h && player.y + player.h > p.y;
+        if (collideX && collideY) {
+          const prevY = player.y - player.vy;
+          if (prevY + player.h <= p.y) {
+            player.y = p.y - player.h;
+            player.vy = 0;
+            player.grounded = true;
+          } else if (prevY >= p.y + p.h) {
+            player.y = p.y + p.h;
+            player.vy = 0;
+          } else if (player.x + player.w / 2 < p.x + p.w / 2) {
+            player.x = p.x - player.w;
+            player.vx = 0;
+          } else {
+            player.x = p.x + p.w;
+            player.vx = 0;
+          }
+        }
+      });
+
+      if (
+        player.x < flag.x + flag.w &&
+        player.x + player.w > flag.x &&
+        player.y < flag.y + flag.h &&
+        player.y + player.h > flag.y
+      ) {
+        cleared = true;
+      }
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      platforms.forEach((p) => {
+        ctx.fillStyle = '#3c7a2c';
+        ctx.fillRect(p.x, p.y, p.w, p.h);
+        ctx.fillStyle = '#2b5720';
+        ctx.fillRect(p.x, p.y, p.w, 6);
+      });
+
+      ctx.fillStyle = '#f4d03f';
+      ctx.fillRect(flag.x, flag.y, 6, flag.h);
+      ctx.fillStyle = '#ff4757';
+      ctx.beginPath();
+      ctx.moveTo(flag.x + 6, flag.y + 10);
+      ctx.lineTo(flag.x + 6 + flag.w, flag.y + 25);
+      ctx.lineTo(flag.x + 6, flag.y + 40);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = '#ff6b6b';
+      ctx.fillRect(player.x, player.y, player.w, player.h);
+      ctx.fillStyle = '#2b2b2b';
+      ctx.fillRect(player.x + 6, player.y + 12, 6, 6);
+      ctx.fillRect(player.x + 20, player.y + 12, 6, 6);
+
+      if (cleared) {
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '32px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('CLEAR! おめでとう！', canvas.width / 2, canvas.height / 2);
+        ctx.font = '16px sans-serif';
+        ctx.fillText('リロードで再スタート', canvas.width / 2, canvas.height / 2 + 30);
+      }
+    }
+
+    function loop() {
+      if (!cleared) {
+        update();
+      }
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    loop();
+  </script>
+</body>
+</html>
+"""
+
+components.html(GAME_HTML, height=460)
+
+st.caption("ブラウザのフォーカスが外れているとキー操作が効かないので、ゲーム画面をクリックしてから操作してください。")
